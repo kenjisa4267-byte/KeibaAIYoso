@@ -1,0 +1,29 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>競馬AI予想 Ver.160</title><style>
+body{margin:0;padding:16px;background:#08111f;color:#edf4ff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.6}main{max-width:760px;margin:auto}section{padding:16px;margin:14px 0;border:1px solid #36506e;border-radius:14px;background:#101c2c}input,button{font:inherit;padding:10px;border-radius:8px;box-sizing:border-box;max-width:100%}input{width:100%;background:#fff;color:#142033;margin:8px 0}button{background:#47d7ac;color:#06231c;border:0;font-weight:bold;margin:5px 4px 5px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><main>
+<h1>競馬AI予想</h1><p>AIが勝つための最適な一手を。</p><p><b>Ver.160｜予測順位と実着順の照合</b></p>
+<section><h2>2つのCSVを照合</h2><p>予測記録と確定着順のCSVを、共通するレースIDと馬名で照合します。両方のファイルに同じ列名が必要です。</p>
+<label>予測CSV（race_id、horse_name、pred_rank）<input id="pred" type="file" accept=".csv,text/csv"></label>
+<label>結果CSV（race_id、horse_name、finish_position）<input id="actual" type="file" accept=".csv,text/csv"></label>
+<button id="run">照合する</button><button id="save" style="background:#263b55;color:#fff;border:1px solid #7594b8">照合結果CSV保存</button>
+<pre id="out">CSVを2つ選んでください。</pre></section>
+<section><h2>CSVの見本</h2><p>予測CSV：</p><pre>race_id,horse_name,pred_rank
+202610120501,馬A,1
+202610120501,馬B,2</pre><p>結果CSV：</p><pre>race_id,horse_name,finish_position
+202610120501,馬B,1
+202610120501,馬A,3</pre><p>レースIDと馬名は、2つのCSVで一致させてください。</p></section>
+<section><h2>注意</h2><p>この版は手元のCSVを照合するツールです。JRAの自動取得、本格的に学習済みのAI、自動投票は含みません。照合できたデータだけを集計します。</p></section>
+<script>
+(()=>{const $=x=>document.getElementById(x);let outputRows=[];
+function parse(s){let R=[],r=[],v='',q=false;for(let i=0;i<s.length;i++){let c=s[i],n=s[i+1];if(c=='"'&&q&&n=='"'){v+='"';i++}else if(c=='"')q=!q;else if(c==','&&!q){r.push(v);v=''}else if((c=='\n'||c=='\r')&&!q){if(c=='\r'&&n=='\n')i++;r.push(v);if(r.some(z=>z.trim()))R.push(r);r=[];v=''}else v+=c}r.push(v);if(r.some(z=>z.trim()))R.push(r);return R}
+function read(file){return new Promise((resolve,reject)=>{if(!file)return reject(Error('CSVを2つ選択してください'));let r=new FileReader();r.onload=()=>{try{let rows=parse(String(r.result).replace(/^\uFEFF/,''));if(rows.length<2)throw Error('CSVにデータ行がありません');let h=rows[0].map(x=>x.trim());resolve(rows.slice(1).map(a=>Object.fromEntries(h.map((k,i)=>[k,(a[i]||'').trim()]))));}catch(e){reject(e)}};r.onerror=()=>reject(Error('CSVを読み込めませんでした'));r.readAsText(file,'UTF-8')})}
+const q=x=>'"'+String(x??'').replace(/"/g,'""')+'"';
+$('run').onclick=async()=>{try{let [p,a]=await Promise.all([read($('pred').files[0]),read($('actual').files[0])]);let actual=new Map();for(let r of a){let k=(r.race_id||'')+'\u0000'+(r.horse_name||'');if(r.race_id&&r.horse_name&&r.finish_position)actual.set(k,r.finish_position)}
+let joined=[];for(let r of p){let k=(r.race_id||'')+'\u0000'+(r.horse_name||''),fin=actual.get(k);if(r.race_id&&r.horse_name&&r.pred_rank&&fin!==undefined)joined.push({race_id:r.race_id,horse_name:r.horse_name,pred_rank:Number(r.pred_rank),finish_position:Number(fin)})}
+if(!joined.length)throw Error('照合できませんでした。列名、レースID、馬名が一致しているか確認してください。');
+let valid=joined.filter(x=>Number.isFinite(x.pred_rank)&&Number.isFinite(x.finish_position));let top1=valid.filter(x=>x.pred_rank===1),winnerHit=top1.filter(x=>x.finish_position===1).length;let abs=valid.map(x=>Math.abs(x.pred_rank-x.finish_position));let races=new Set(valid.map(x=>x.race_id));let raceTop1=new Map();for(let x of valid)if(x.pred_rank===1){let old=raceTop1.get(x.race_id);if(!old||x.finish_position<old)raceTop1.set(x.race_id,x.finish_position)}
+outputRows=[['race_id','horse_name','pred_rank','finish_position','absolute_rank_difference'],...valid.map(x=>[x.race_id,x.horse_name,x.pred_rank,x.finish_position,Math.abs(x.pred_rank-x.finish_position)])];
+let avg=abs.reduce((s,x)=>s+x,0)/(abs.length||1);$('out').textContent='照合できた馬のデータ：'+valid.length+'件\n対象レース数：'+races.size+'\n予測1位の馬のうち実際に1着：'+winnerHit+' / '+top1.length+'件'+(top1.length?'（'+(100*winnerHit/top1.length).toFixed(1)+'%）':'')+'\n予測順位と実着順の平均絶対差：'+avg.toFixed(2)+'着\n\n※予測1位の1着率は、予測1位が記録されている照合済み行を母数にしています。データ件数が少ない場合は参考値です。';
+}catch(e){$('out').textContent='照合エラー：'+e.message}};
+$('save').onclick=()=>{if(!outputRows.length){$('out').textContent='先に照合してください。';return}let b=new Blob(['\uFEFF'+outputRows.map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='KeibaAIYoso_Ver160_rank_comparison.csv';a.click();URL.revokeObjectURL(u)};
+})();
+</script></main></body></html>
